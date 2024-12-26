@@ -3,6 +3,22 @@ from tkinter import ttk, filedialog, messagebox
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
+import pandas as pd
+import matplotlib.pyplot as plt
+from tkinter import messagebox
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+
+import os
+import pandas as pd
+import matplotlib.pyplot as plt
+from tkinter import messagebox
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+
+
 
 class SalesApp:
     def __init__(self, root):
@@ -82,89 +98,151 @@ class SalesApp:
             messagebox.showwarning("Sem dados", "Não há dados para analisar.")
             return
 
-        regioes = [venda["Região"] for venda in self.dados_vendas]
-        regioes_unicas = list(set(regioes))
-        vendas_por_regiao = {regiao: regioes.count(regiao) for regiao in regioes_unicas}
+        df = pd.DataFrame(self.dados_vendas)
 
-        regioes_custo = {regiao: [] for regiao in regioes_unicas}
-        for venda in self.dados_vendas:
-            try:
-                custo_unitario = float(venda["Custo Unitário"])
-                regioes_custo[venda["Região"]].append(custo_unitario)
-            except ValueError:
-                continue
+        required_columns = {'Data da Venda', 'Horário da Venda', 'Produto', 'SKU', 'Categoria',
+                            'Método de Pagamento', 'Região', 'Cliente', 'Origem do Cliente',
+                            'Status do Pedido', 'Canal de Venda', 'Quantidade', 'Preço Unitário',
+                            'Desconto Aplicado (%)', 'Custo Unitário', 'Total da Venda',
+                            'Lucro Bruto', 'Frete', 'Prazo de Entrega Estimado (dias)',
+                            'Prazo de Entrega Real (dias)', 'Feedback do Cliente'}
 
-        custo_medio_por_regiao = {regiao: sum(custos) / len(custos) for regiao, custos in regioes_custo.items() if custos}
+        if not required_columns.issubset(df.columns):
+            messagebox.showerror("Erro", "Faltam colunas necessárias nos dados para análise.")
+            return
 
-        produtos = [venda["Produto"] for venda in self.dados_vendas]
-        produtos_unicos = list(set(produtos))
-        vendas_por_produto = {produto: produtos.count(produto) for produto in produtos_unicos}
+        if not os.path.exists("img"):
+            os.makedirs("img")
 
-        produtos_preco = {produto: [] for produto in produtos_unicos}
-        for venda in self.dados_vendas:
-            try:
-                preco_unitario = float(venda["Preço Unitário"])
-                produtos_preco[venda["Produto"]].append(preco_unitario)
-            except ValueError:
-                continue
+        vendas_por_regiao = df['Região'].value_counts()
+        vendas_por_produto = df['Produto'].value_counts()
+        preco_medio_por_produto = df.groupby('Produto')['Preço Unitário'].mean()
 
-        preco_medio_por_produto = {produto: sum(precos) / len(precos) for produto, precos in produtos_preco.items() if precos}
+        cancelados = df[df['Status do Pedido'] == 'Cancelado']
+        bins = [0, 10, 15, 20, 30, 50, 100]
+        labels = ['0-10', '10-15', '15-20', '20-30', '30-50', '50-100']
+        cancelados['Faixa de Frete'] = pd.cut(cancelados['Frete'], bins=bins, labels=labels)
 
-        fig, axs = plt.subplots(2, 2, figsize=(15, 12))
+        cancelamentos_por_faixa = cancelados['Faixa de Frete'].value_counts().sort_index()
+        frete_medio_por_faixa = cancelados.groupby('Faixa de Frete')['Frete'].mean()
 
-        axs[0, 0].bar(vendas_por_regiao.keys(), vendas_por_regiao.values(), color="#4CAF50")
-        axs[0, 0].set_xlabel("Região")
-        axs[0, 0].set_ylabel("Quantidade de Vendas")
-        axs[0, 0].set_title("Quantidade de Vendas por Região")
-        axs[0, 0].tick_params(axis="x", rotation=45)
+        regiao_com_mais_cancelamentos = df[df['Status do Pedido'] == 'Cancelado']['Região'].value_counts()
+        regiao_com_mais_clientes_insatisfeitos = df[df['Feedback do Cliente'] == 'Muito Insatisfeito']['Região'].value_counts()
+        produtos_com_mais_insatisfacoes = df[df['Feedback do Cliente'] == 'Insatisfeito']['Produto'].value_counts()
 
-        axs[0, 1].bar(custo_medio_por_regiao.keys(), custo_medio_por_regiao.values(), color="#4CAF50")
-        axs[0, 1].set_xlabel("Região")
-        axs[0, 1].set_ylabel("Custo Unitário Médio")
-        axs[0, 1].set_title("Custo Unitário Médio por Região")
-        axs[0, 1].tick_params(axis="x", rotation=45)
+        frete_medio_por_produto = df.groupby('Produto')['Frete'].mean()
+        correlacao_frete_vendas = frete_medio_por_produto.corr(vendas_por_produto)
 
-        axs[1, 0].bar(vendas_por_produto.keys(), vendas_por_produto.values(), color="#4CAF50")
-        axs[1, 0].set_xlabel("Produto")
-        axs[1, 0].set_ylabel("Quantidade de Vendas")
-        axs[1, 0].set_title("Quantidade de Vendas por Produto")
-        axs[1, 0].tick_params(axis="x", rotation=45)
+        produtos_bem_vendidos_por_regiao = df.groupby(['Região', 'Produto'])['Quantidade'].sum().unstack().fillna(0)
 
-        axs[1, 1].bar(preco_medio_por_produto.keys(), preco_medio_por_produto.values(), color="#4CAF50")
-        axs[1, 1].set_xlabel("Produto")
-        axs[1, 1].set_ylabel("Preço Unitário Médio")
-        axs[1, 1].set_title("Preço Unitário Médio por Produto")
-        axs[1, 1].tick_params(axis="x", rotation=45)
+        def salvar_grafico(fig, filename):
+            fig.tight_layout()
+            fig.savefig(filename)
+            plt.close(fig)
 
-        plt.tight_layout()
+        fig, ax = plt.subplots(figsize=(9, 5))
+        ax.bar(vendas_por_regiao.index, vendas_por_regiao.values, color="#4CAF50")
+        ax.set_title("Quantidade de Vendas por Região")
+        ax.set_xlabel("Região")
+        ax.set_ylabel("Quantidade de Vendas")
+        ax.tick_params(axis="x", rotation=45)
+        salvar_grafico(fig, "img/vendas_por_regiao.png")
 
-        plt.savefig("analise_vendas.png")
-        plt.show()
+        fig, ax = plt.subplots(figsize=(9, 5))
+        ax.bar(vendas_por_produto.index, vendas_por_produto.values, color="#4CAF50")
+        ax.set_title("Quantidade de Vendas por Produto")
+        ax.set_xlabel("Produto")
+        ax.set_ylabel("Quantidade de Vendas")
+        ax.tick_params(axis="x", rotation=45)
+        salvar_grafico(fig, "img/vendas_por_produto.png")
 
-        with pd.ExcelWriter("analise_vendas.xlsx") as writer:
-            pd.DataFrame(vendas_por_regiao.items(), columns=["Região", "Quantidade de Vendas"]).to_excel(writer, sheet_name="Vendas por Região", index=False)
-            pd.DataFrame(custo_medio_por_regiao.items(), columns=["Região", "Custo Unitário Médio"]).to_excel(writer, sheet_name="Custo Unitário por Região", index=False)
-            pd.DataFrame(vendas_por_produto.items(), columns=["Produto", "Quantidade de Vendas"]).to_excel(writer, sheet_name="Vendas por Produto", index=False)
-            pd.DataFrame(preco_medio_por_produto.items(), columns=["Produto", "Preço Unitário Médio"]).to_excel(writer, sheet_name="Preço Unitário por Produto", index=False)
+        fig, ax = plt.subplots(figsize=(9, 5))
+        ax.bar(cancelamentos_por_faixa.index.astype(str), cancelamentos_por_faixa.values, color="#4CAF50")
+        ax.set_title("Cancelamentos por Faixa de Frete")
+        ax.set_xlabel("Faixa de Frete")
+        ax.set_ylabel("Cancelamentos")
+        ax.tick_params(axis="x", rotation=45)
+        salvar_grafico(fig, "img/cancelamentos_por_faixa.png")
 
-        with open("analise_vendas.txt", "w") as file:
-            file.write("Análise de Vendas\n")
-            file.write("=================\n\n")
-            file.write("Quantidade de Vendas por Região:\n")
-            for regiao, quantidade in vendas_por_regiao.items():
-                file.write(f"{regiao}: {quantidade}\n")
-            file.write("\nCusto Unitário Médio por Região:\n")
-            for regiao, custo_medio in custo_medio_por_regiao.items():
-                file.write(f"{regiao}: {custo_medio:.2f}\n")
-            file.write("\nQuantidade de Vendas por Produto:\n")
-            for produto, quantidade in vendas_por_produto.items():
-                file.write(f"{produto}: {quantidade}\n")
-            file.write("\nPreço Unitário Médio por Produto:\n")
-            for produto, preco_medio in preco_medio_por_produto.items():
-                file.write(f"{produto}: {preco_medio:.2f}\n")
+        fig, ax = plt.subplots(figsize=(9, 5))
+        ax.bar(frete_medio_por_produto.index, frete_medio_por_produto.values, color="#4CAF50")
+        ax.set_title("Frete Médio por Produto")
+        ax.set_xlabel("Produto")
+        ax.set_ylabel("Frete Médio")
+        ax.tick_params(axis="x", rotation=45)
+        salvar_grafico(fig, "img/frete_medio_por_produto.png")
 
-        messagebox.showinfo("Análise Concluída", "A análise foi concluída e os resultados foram exportados.")
+        fig, ax = plt.subplots(figsize=(9, 5))
+        produtos_bem_vendidos_por_regiao.plot(kind='bar', stacked=True, ax=ax, colormap='viridis')
+        ax.set_title("Produtos Bem Vendidos por Região")
+        ax.set_xlabel("Região")
+        ax.set_ylabel("Quantidade Vendida")
+        ax.legend(title="Produto", bbox_to_anchor=(1.05, 1), loc='upper left')
+        salvar_grafico(fig, "img/produtos_bem_vendidos_por_regiao.png")
 
+        conclusoes = []
+
+        conclusoes.append("Análise de Cancelamentos por Faixa de Frete:")
+        for faixa, cancelamentos in cancelamentos_por_faixa.items():
+            conclusoes.append(f"- Faixa {faixa}: {cancelamentos} cancelamentos")
+
+        conclusoes.append("\nFrete Médio por Faixa de Frete:")
+        for faixa, frete in frete_medio_por_faixa.items():
+            conclusoes.append(f"- Faixa {faixa}: R$ {frete:.2f}")
+
+        conclusoes.append("\nRegião com o Maior Número de Cancelamentos:")
+        for regiao, cancelamentos in regiao_com_mais_cancelamentos.items():
+            conclusoes.append(f"- Região {regiao}: {cancelamentos} cancelamentos")
+
+        conclusoes.append("\nRegião com o Maior Número de Clientes Insatisfeitos:")
+        for regiao, insatisfeitos in regiao_com_mais_clientes_insatisfeitos.items():
+            conclusoes.append(f"- Região {regiao}: {insatisfeitos} clientes insatisfeitos")
+
+        conclusoes.append("\nProduto com Maior Número de Insatisfações:")
+        for produto, insatisfeitos in produtos_com_mais_insatisfacoes.items():
+            conclusoes.append(f"- Produto {produto}: {insatisfeitos} insatisfações")
+
+        conclusoes.append("\nAnálise de Correlação entre Frete e Vendas:")
+        conclusoes.append(f"A correlação entre frete médio e quantidade de vendas por produto é: {correlacao_frete_vendas:.2f}")
+
+        conclusoes_texto = "\n".join(conclusoes)
+        print(conclusoes_texto)
+
+        pdf_filename = "analise_vendas.pdf"
+        c = canvas.Canvas(pdf_filename, pagesize=letter)
+        width, height = letter
+
+        c.setFont("Helvetica", 12)
+        c.drawString(30, height - 30, "Análise de Dados de Vendas")
+        c.setFont("Helvetica", 10)
+
+        y_position = height - 60
+        for linha in conclusoes:
+            if linha.startswith("\n"):
+                y_position -= 20
+                linha = linha.strip()
+            c.drawString(30, y_position, linha)
+            y_position -= 15
+            if y_position < 40:
+                c.showPage()
+                c.setFont("Helvetica", 10)
+                y_position = height - 40
+
+        c.showPage()
+        c.drawImage(ImageReader("img/vendas_por_regiao.png"), 30, 30, width - 60, height - 60)
+        c.showPage()
+        c.drawImage(ImageReader("img/vendas_por_produto.png"), 30, 30, width - 60, height - 60)
+        c.showPage()
+        c.drawImage(ImageReader("img/cancelamentos_por_faixa.png"), 30, 30, width - 60, height - 60)
+        c.showPage()
+        c.drawImage(ImageReader("img/frete_medio_por_produto.png"), 30, 30, width - 60, height - 60)
+        c.showPage()
+        c.drawImage(ImageReader("img/produtos_bem_vendidos_por_regiao.png"), 30, 30, width - 60, height - 60)
+
+        c.save()
+
+        messagebox.showinfo("Análise Concluída", f"A análise foi concluída com sucesso e os gráficos foram exibidos.\n\n{conclusoes_texto}\n\nO relatório foi salvo como {pdf_filename}")
+                
     def criar_tabela(self):
         table_frame = ttk.LabelFrame(self.root, text="Vendas Registradas", style="TLabelframe")
         table_frame.pack(fill="both", padx=15, pady=15, expand=False)
